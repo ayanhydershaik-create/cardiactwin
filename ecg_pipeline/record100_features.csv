@@ -1,0 +1,2 @@
+record_name,sampling_rate_hz,duration_seconds,detected_peak_count,valid_rr_interval_count,mean_rr_seconds,median_rr_seconds,mean_heart_rate_bpm,median_heart_rate_bpm,signal_mean_mv,signal_std_mv
+100,360.0,1805.5555555555557,2291,2289,0.7885697296247755,0.7972222222222172,77.07329460213582,75.26132404181233,-0.3062989769230769,0.19319954213721688

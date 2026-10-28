@@ -1,0 +1,17 @@
+{
+  "short_name": "CardiacTwin",
+  "name": "Cardiac Digital Twin Research Platform",
+  "icons": [
+    {
+      "src": "/cardiac-icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#f8fafc",
+  "theme_color": "#0284c7",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "categories": ["medical", "research", "productivity"]
+}
