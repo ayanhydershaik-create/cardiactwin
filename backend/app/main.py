@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from app.ecg_predictor import predict_heartbeat
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -22,7 +22,7 @@ app = FastAPI(
     version="0.3.0",
 )
 
-# Allow frontend dev server (localhost:3000 / :5173) to call the API
+# CORS configuration supporting localhost and production Vercel domains
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -31,13 +31,17 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
     ],
+    allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Unified Router serving both root paths (for local dev) and /api paths (for Vercel rewrites)
+api_router = APIRouter()
+
 # Mount agentic AI router at /agent/...
-app.include_router(agent_router)
+api_router.include_router(agent_router)
 
 
 class HeartbeatPredictionRequest(BaseModel):
@@ -48,7 +52,7 @@ class HeartbeatPredictionRequest(BaseModel):
         description="Exactly 234 preprocessed ECG heartbeat features",
     )
 
-@app.get("/")
+@api_router.get("/")
 def root():
     return {
         "message": "Cardiac Digital Twin API is running",
@@ -58,7 +62,7 @@ def root():
     }
 
 
-@app.get("/health")
+@api_router.get("/health")
 def health():
     return {
         "status": "healthy",
@@ -66,7 +70,7 @@ def health():
     }
 
 
-@app.get("/health/database")
+@api_router.get("/health/database")
 def database_health():
     try:
         with engine.connect() as connection:
@@ -86,7 +90,7 @@ def database_health():
         )
 
 
-@app.post("/patients", response_model=PatientRead, status_code=201)
+@api_router.post("/patients", response_model=PatientRead, status_code=201)
 def create_patient(
     patient_data: PatientCreate,
     db: Session = Depends(get_db),
@@ -106,7 +110,7 @@ def create_patient(
         )
 
 
-@app.get("/patients", response_model=list[PatientRead])
+@api_router.get("/patients", response_model=list[PatientRead])
 def list_patients(
     skip: int = 0,
     limit: int = 100,
@@ -127,7 +131,7 @@ def list_patients(
     )
 
 
-@app.post(
+@api_router.post(
     "/ecg-observations",
     response_model=ECGObservationRead,
     status_code=201,
@@ -152,7 +156,7 @@ def create_ecg_observation(
     return observation
 
 
-@app.get(
+@api_router.get(
     "/ecg-observations",
     response_model=list[ECGObservationRead],
 )
@@ -181,9 +185,13 @@ def list_ecg_observations(
     )
 
 
-@app.post("/predict/heartbeat")
+@api_router.post("/predict/heartbeat")
 def predict_ecg_heartbeat(request: HeartbeatPredictionRequest):
     try:
         return predict_heartbeat(request.features)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+# Mount unified router for both root and /api prefixes
+app.include_router(api_router)
+app.include_router(api_router, prefix="/api")
