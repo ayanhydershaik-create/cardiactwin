@@ -21,12 +21,37 @@ interface SessionResult {
   label: string;
 }
 
+const RESULTS_STORAGE_KEY = 'cardiac_twin_session_results';
+
 const MainApp: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
   const [bleStatus, setBleStatus] = useState<BleConnectionStatus>(bleAdapter.getStatus());
   const [sampleCount, setSampleCount] = useState<number>(0);
-  const [recentResults, setRecentResults] = useState<SessionResult[]>([]);
+  const [recentResults, setRecentResults] = useState<SessionResult[]>(() => {
+    try {
+      const saved = localStorage.getItem(RESULTS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.map((item: any) => ({
+          ...item,
+          timestamp: new Date(item.timestamp),
+        }));
+      }
+    } catch {
+      // Fallback
+    }
+    return [];
+  });
   const [agentOpen, setAgentOpen] = useState(false);
+
+  // Sync recent results to localStorage
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(RESULTS_STORAGE_KEY, JSON.stringify(recentResults));
+    } catch {
+      // Ignore
+    }
+  }, [recentResults]);
 
   // Subscribe to BLE connection status
   React.useEffect(() => {
@@ -71,6 +96,7 @@ const MainApp: React.FC = () => {
             bleStatus={bleStatus}
             sampleCount={sampleCount}
             onSampleCountChange={setSampleCount}
+            onRecordResult={handleRecordResult}
           />
         )}
 

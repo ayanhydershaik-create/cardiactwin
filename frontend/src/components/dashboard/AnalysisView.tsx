@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Cpu, Play, RotateCcw, AlertCircle, Check, Sparkles } from 'lucide-react';
+import { Cpu, Play, RotateCcw, AlertCircle, Check, Sparkles, Activity } from 'lucide-react';
 import { apiClient } from '../../services/api/client';
+import { bleAdapter } from '../../services/ble/adapter';
 import { HeartbeatPredictionResponse } from '../../types/api';
 import { PRESET_HEARTBEATS, PresetHeartbeat } from '../../data/presetSamples';
 
@@ -9,7 +10,8 @@ interface AnalysisViewProps {
 }
 
 export const AnalysisView: React.FC<AnalysisViewProps> = ({ onRecordResult }) => {
-  const [selectedPreset, setSelectedPreset] = useState<PresetHeartbeat>(PRESET_HEARTBEATS[0]);
+  const [selectedPreset, setSelectedPreset] = useState<PresetHeartbeat | null>(null);
+  const [isLiveSource, setIsLiveSource] = useState<boolean>(true);
   const [rawText, setRawText] = useState<string>('');
   const [features, setFeatures] = useState<number[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -19,7 +21,31 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ onRecordResult }) =>
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  const loadLiveSample = () => {
+    setIsLiveSource(true);
+    setSelectedPreset(null);
+    const liveVoltages = bleAdapter.getRecentVoltages(234);
+    let sample: number[] = [];
+
+    if (liveVoltages.length >= 234) {
+      sample = liveVoltages.slice(-234);
+    } else if (liveVoltages.length > 0) {
+      for (let i = 0; i < 234; i++) {
+        const idx = Math.min(liveVoltages.length - 1, Math.floor((i / 234) * liveVoltages.length));
+        sample.push(liveVoltages[idx] || 0.0);
+      }
+    } else {
+      sample = PRESET_HEARTBEATS[0].features;
+    }
+
+    setRawText(JSON.stringify(sample, null, 2));
+    setFeatures(sample);
+    setValidationError(null);
+    setApiError(null);
+  };
+
   const loadPreset = (preset: PresetHeartbeat) => {
+    setIsLiveSource(false);
     setSelectedPreset(preset);
     setRawText(JSON.stringify(preset.features, null, 2));
     setFeatures(preset.features);
@@ -28,7 +54,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ onRecordResult }) =>
   };
 
   useEffect(() => {
-    loadPreset(PRESET_HEARTBEATS[0]);
+    // Default to Live Hardware Telemetry window if connected/available
+    loadLiveSample();
   }, []);
 
   const handleTextChange = (text: string) => {
@@ -142,7 +169,10 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ onRecordResult }) =>
     try {
       const res = await apiClient.predictHeartbeat(features);
       setLatestPrediction(res);
-      onRecordResult(res, selectedPreset.name);
+      const label = isLiveSource
+        ? `Live Hardware Stream (${res.predicted_class})`
+        : (selectedPreset ? selectedPreset.name : 'Custom ECG Window');
+      onRecordResult(res, label);
     } catch (err: unknown) {
       setApiError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -159,52 +189,73 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ onRecordResult }) =>
         </p>
       </div>
 
-      {/* Preset Selector */}
+      {/* Source Selector: Live Hardware Window vs Clinical Reference Presets */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-sky-600" />
+            <Activity className="w-4 h-4 text-emerald-600" />
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-              Clinical Reference Presets
+              Input Signal Source
             </h3>
           </div>
-          <span className="text-[11px] text-slate-400">Authentic MIT-BIH Arrhythmia Samples</span>
+          
+          <button
+            onClick={loadLiveSample}
+            className={`px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all ${
+              isLiveSource
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Load Live Sensor Telemetry (234 Samples)</span>
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {PRESET_HEARTBEATS.map((preset) => {
-            const isSelected = selectedPreset.id === preset.id;
-            return (
-              <button
-                key={preset.id}
-                onClick={() => loadPreset(preset)}
-                className={`p-3 rounded-xl border text-left transition-all ${
-                  isSelected
-                    ? 'border-sky-500 bg-sky-50/60 shadow-xs'
-                    : 'border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                      preset.label === 'N'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : preset.label === 'S'
-                        ? 'bg-amber-100 text-amber-800'
-                        : preset.label === 'V'
-                        ? 'bg-rose-100 text-rose-800'
-                        : 'bg-indigo-100 text-indigo-800'
-                    }`}
-                  >
-                    Class {preset.label}
-                  </span>
-                  {isSelected && <Check className="w-4 h-4 text-sky-600" />}
-                </div>
-                <h4 className="font-bold text-xs text-slate-900">{preset.name}</h4>
-                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{preset.description}</p>
-              </button>
-            );
-          })}
+        <div className="pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-3.5 h-3.5 text-sky-600" />
+              <span className="text-xs font-bold text-slate-600">Reference Benchmark Cohorts</span>
+            </div>
+            <span className="text-[11px] text-slate-400">Authentic MIT-BIH Arrhythmia Presets</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {PRESET_HEARTBEATS.map((preset) => {
+              const isSelected = !isLiveSource && selectedPreset?.id === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  onClick={() => loadPreset(preset)}
+                  className={`p-3 rounded-xl border text-left transition-all ${
+                    isSelected
+                      ? 'border-sky-500 bg-sky-50/60 shadow-xs'
+                      : 'border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                        preset.label === 'N'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : preset.label === 'S'
+                          ? 'bg-amber-100 text-amber-800'
+                          : preset.label === 'V'
+                          ? 'bg-rose-100 text-rose-800'
+                          : 'bg-indigo-100 text-indigo-800'
+                      }`}
+                    >
+                      Class {preset.label}
+                    </span>
+                    {isSelected && <Check className="w-4 h-4 text-sky-600" />}
+                  </div>
+                  <h4 className="font-bold text-xs text-slate-900">{preset.name}</h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{preset.description}</p>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

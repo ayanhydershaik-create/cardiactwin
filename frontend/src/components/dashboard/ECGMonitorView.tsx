@@ -20,6 +20,7 @@ interface ECGMonitorViewProps {
   bleStatus: BleConnectionStatus;
   sampleCount: number;
   onSampleCountChange: (count: number | ((prev: number) => number)) => void;
+  onRecordResult?: (prediction: any, label: string) => void;
 }
 
 export interface RecordedSession {
@@ -135,6 +136,7 @@ export const ECGMonitorView: React.FC<ECGMonitorViewProps> = ({
   bleStatus,
   sampleCount,
   onSampleCountChange,
+  onRecordResult,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -212,13 +214,15 @@ export const ECGMonitorView: React.FC<ECGMonitorViewProps> = ({
 
   // ── Trigger 10-Minute ML Analysis & AI Report ────────────────────────────
   const triggerSessionAnalysis = useCallback(async () => {
-    if (recentVoltagesRef.current.length < 30 && !isDemoMode) {
-      return;
+    // Collect voltages from component ref or BLE adapter rolling window
+    let availableVoltages = recentVoltagesRef.current;
+    if (availableVoltages.length < 30) {
+      availableVoltages = bleAdapter.getRecentVoltages(234);
     }
 
     setIsAnalyzing(true);
     try {
-      const rawWindow = recentVoltagesRef.current.slice(-234);
+      const rawWindow = availableVoltages.slice(-234);
       let features: number[] = [];
 
       if (rawWindow.length >= 234) {
@@ -281,6 +285,11 @@ export const ECGMonitorView: React.FC<ECGMonitorViewProps> = ({
       };
 
       setSessionHistory((prev) => [newSession, ...prev]);
+
+      // Propagate to global session results for the ResultsView and HomeView
+      if (onRecordResult && data.prediction) {
+        onRecordResult(data.prediction, `Live Snapshot (${predClass}) - ${new Date().toLocaleTimeString()}`);
+      }
     } catch (err) {
       console.error('Session analysis failed:', err);
     } finally {

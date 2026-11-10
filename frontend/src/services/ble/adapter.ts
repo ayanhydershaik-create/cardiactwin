@@ -23,6 +23,20 @@ export class BleAdapter {
   private onDataCallbacks: Array<(packet: BlePacket) => void> = [];
   private onErrorCallbacks: Array<(error: string) => void> = [];
 
+  // Rolling in-memory window of recent voltages across all views
+  private recentVoltages: number[] = [];
+
+  public getRecentVoltages(maxSamples = 234): number[] {
+    return this.recentVoltages.slice(-maxSamples);
+  }
+
+  public recordVoltage(v: number): void {
+    this.recentVoltages.push(v);
+    if (this.recentVoltages.length > 5000) {
+      this.recentVoltages.shift();
+    }
+  }
+
   constructor() {
     if (typeof window !== 'undefined' && !navigator.bluetooth) {
       this.status = 'unsupported';
@@ -271,7 +285,16 @@ export class BleAdapter {
           packet.heartRate = heartRate;
           packet.rawSample = heartRate > 0 ? Math.round(heartRate) : undefined;
 
-          this.onDataCallbacks.forEach((cb) => cb(packet));
+          // Automatically archive in rolling voltage buffer for analysis and snapshotting
+    if (packet.samples && packet.samples.length > 0) {
+      for (const s of packet.samples) {
+        this.recordVoltage(s);
+      }
+    } else {
+      this.recordVoltage(packet.voltageMv);
+    }
+
+    this.onDataCallbacks.forEach((cb) => cb(packet));
           return;
         } else {
           // Comma-separated: "E:bio,adc,leadsOff,spo2,hr" (5 parts) or "E:ecgRaw,leadsOff,spo2,hr" (4 parts)
@@ -293,7 +316,16 @@ export class BleAdapter {
             packet.heartRate = heartRate;
             packet.rawSample = heartRate > 0 ? Math.round(heartRate) : undefined;
 
-            this.onDataCallbacks.forEach((cb) => cb(packet));
+            // Automatically archive in rolling voltage buffer for analysis and snapshotting
+    if (packet.samples && packet.samples.length > 0) {
+      for (const s of packet.samples) {
+        this.recordVoltage(s);
+      }
+    } else {
+      this.recordVoltage(packet.voltageMv);
+    }
+
+    this.onDataCallbacks.forEach((cb) => cb(packet));
             return;
           } else if (parts.length >= 4) {
             const ecgRaw = parseInt(parts[0], 10);
@@ -311,13 +343,31 @@ export class BleAdapter {
             packet.heartRate = heartRate;
             packet.rawSample = heartRate > 0 ? Math.round(heartRate) : undefined;
 
-            this.onDataCallbacks.forEach((cb) => cb(packet));
+            // Automatically archive in rolling voltage buffer for analysis and snapshotting
+    if (packet.samples && packet.samples.length > 0) {
+      for (const s of packet.samples) {
+        this.recordVoltage(s);
+      }
+    } else {
+      this.recordVoltage(packet.voltageMv);
+    }
+
+    this.onDataCallbacks.forEach((cb) => cb(packet));
             return;
           } else if (parts.length >= 1) {
             const ecgRaw = parseInt(parts[0], 10);
             packet.voltageMv = this.convertAdcToMv(ecgRaw);
             packet.ecgRaw = ecgRaw;
-            this.onDataCallbacks.forEach((cb) => cb(packet));
+            // Automatically archive in rolling voltage buffer for analysis and snapshotting
+    if (packet.samples && packet.samples.length > 0) {
+      for (const s of packet.samples) {
+        this.recordVoltage(s);
+      }
+    } else {
+      this.recordVoltage(packet.voltageMv);
+    }
+
+    this.onDataCallbacks.forEach((cb) => cb(packet));
             return;
           }
         }
@@ -357,7 +407,16 @@ export class BleAdapter {
         packet.heartRate = heartRate;
         packet.rawSample = heartRate > 0 ? Math.round(heartRate) : undefined;
 
-        this.onDataCallbacks.forEach((cb) => cb(packet));
+        // Automatically archive in rolling voltage buffer for analysis and snapshotting
+    if (packet.samples && packet.samples.length > 0) {
+      for (const s of packet.samples) {
+        this.recordVoltage(s);
+      }
+    } else {
+      this.recordVoltage(packet.voltageMv);
+    }
+
+    this.onDataCallbacks.forEach((cb) => cb(packet));
         return;
       }
 
@@ -386,7 +445,16 @@ export class BleAdapter {
           packet.heartRate = heartRate;
           packet.rawSample = heartRate > 0 && Number.isFinite(heartRate) ? Math.round(heartRate) : undefined;
 
-          this.onDataCallbacks.forEach((cb) => cb(packet));
+          // Automatically archive in rolling voltage buffer for analysis and snapshotting
+    if (packet.samples && packet.samples.length > 0) {
+      for (const s of packet.samples) {
+        this.recordVoltage(s);
+      }
+    } else {
+      this.recordVoltage(packet.voltageMv);
+    }
+
+    this.onDataCallbacks.forEach((cb) => cb(packet));
           return;
         }
       }
@@ -396,7 +464,16 @@ export class BleAdapter {
       if (Number.isFinite(singleVal)) {
         packet.voltageMv = this.convertAdcToMv(singleVal);
         packet.ecgRaw = singleVal;
-        this.onDataCallbacks.forEach((cb) => cb(packet));
+        // Automatically archive in rolling voltage buffer for analysis and snapshotting
+    if (packet.samples && packet.samples.length > 0) {
+      for (const s of packet.samples) {
+        this.recordVoltage(s);
+      }
+    } else {
+      this.recordVoltage(packet.voltageMv);
+    }
+
+    this.onDataCallbacks.forEach((cb) => cb(packet));
         return;
       }
     } catch {
@@ -417,6 +494,15 @@ export class BleAdapter {
       packet.rawSample = bpm;
       packet.heartRate = bpm;
       packet.voltageMv = (bpm / 100) - 0.5;
+    }
+
+    // Automatically archive in rolling voltage buffer for analysis and snapshotting
+    if (packet.samples && packet.samples.length > 0) {
+      for (const s of packet.samples) {
+        this.recordVoltage(s);
+      }
+    } else {
+      this.recordVoltage(packet.voltageMv);
     }
 
     this.onDataCallbacks.forEach((cb) => cb(packet));
