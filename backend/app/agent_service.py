@@ -214,11 +214,11 @@ class GeminiKeyPool:
 
 key_pool = GeminiKeyPool()
 
-# Active models in modern Google GenAI SDK (evaluated in order)
+# Active candidate models in modern Google GenAI SDK (evaluated in order)
 CANDIDATE_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-flash-latest",
-    "gemini-3.8-flash",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-flash-lite",
+    "gemini-3-flash-preview",
 ]
 
 
@@ -426,14 +426,14 @@ def run_agent(
                         f"Instructions: Deliver an articulate, exhaustive, professional cardiology response. Do not use raw '#' header symbols; use bold text for titles."
                     )
                     
-                    # Execute with a 3.5-second failover timeout to ensure instantaneous user response
+                    # Execute with a 6.0-second failover timeout to allow thorough medical synthesis
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                         future = executor.submit(
                             client.models.generate_content,
                             model=model_name,
                             contents=augmented_prompt,
                         )
-                        response = future.result(timeout=3.5)
+                        response = future.result(timeout=6.0)
 
                     reply_text = response.text or ""
                     if reply_text.strip():
@@ -560,6 +560,8 @@ def _log_activity(
     reply: str,
     tools_called: list[dict],
 ) -> None:
+    if db is None:
+        return
     try:
         activity = AgentActivity(
             agent_name=f"CardiacAgent/{key_label}",
@@ -574,7 +576,10 @@ def _log_activity(
         db.commit()
     except Exception as e:
         logger.warning("Failed to log activity: %s", e)
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
 
 def get_key_pool_status() -> dict:
