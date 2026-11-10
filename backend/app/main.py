@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from app.ecg_predictor import predict_heartbeat
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -13,12 +14,32 @@ from app.schemas import (
     ECGObservationCreate,
     ECGObservationRead,
 )
+from app.agent_router import router as agent_router
 
 app = FastAPI(
     title="Cardiac Digital Twin API",
-    description="Research prototype for ECG analysis and cardiac digital twin monitoring.",
-    version="0.2.0",
+    description="Research prototype for ECG analysis, cardiac digital twin monitoring — powered by Gemini Agentic AI.",
+    version="0.3.0",
 )
+
+# Allow frontend dev server (localhost:3000 / :5173) to call the API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount agentic AI router at /agent/...
+app.include_router(agent_router)
+
+
 class HeartbeatPredictionRequest(BaseModel):
     features: list[float] = Field(
         ...,
@@ -32,6 +53,8 @@ def root():
     return {
         "message": "Cardiac Digital Twin API is running",
         "status": "ok",
+        "version": "0.3.0",
+        "agentic_ai": "enabled",
     }
 
 
@@ -156,6 +179,8 @@ def list_ecg_observations(
         .limit(limit)
         .all()
     )
+
+
 @app.post("/predict/heartbeat")
 def predict_ecg_heartbeat(request: HeartbeatPredictionRequest):
     try:

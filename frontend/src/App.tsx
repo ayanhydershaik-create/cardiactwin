@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Brain } from 'lucide-react';
 import { AuthProvider, useAuth } from './services/auth/authContext';
 import { Header, AppTab } from './components/common/Header';
 import { LandingPage } from './components/landing/LandingPage';
@@ -9,6 +10,7 @@ import { AnalysisView } from './components/dashboard/AnalysisView';
 import { ResultsView } from './components/dashboard/ResultsView';
 import { AssistantView } from './components/chat/AssistantView';
 import { SettingsView } from './components/dashboard/SettingsView';
+import { CardiacAgentChatbot } from './components/chat/CardiacAgentChatbot';
 import { bleAdapter } from './services/ble/adapter';
 import { BleConnectionStatus } from './types/ble';
 import { HeartbeatPredictionResponse } from './types/api';
@@ -24,6 +26,7 @@ const MainApp: React.FC = () => {
   const [bleStatus, setBleStatus] = useState<BleConnectionStatus>(bleAdapter.getStatus());
   const [sampleCount, setSampleCount] = useState<number>(0);
   const [recentResults, setRecentResults] = useState<SessionResult[]>([]);
+  const [agentOpen, setAgentOpen] = useState(false);
 
   // Subscribe to BLE connection status
   React.useEffect(() => {
@@ -95,6 +98,23 @@ const MainApp: React.FC = () => {
           </p>
         </div>
       </footer>
+
+      {/* ── Floating Gemini Agent Button ── */}
+      <button
+        onClick={() => setAgentOpen(true)}
+        className={`fixed bottom-6 right-6 w-14 h-14 rounded-full bg-gradient-to-br from-sky-500 to-indigo-600 shadow-xl flex items-center justify-center text-white hover:scale-110 transition-all duration-200 z-40 ${agentOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+        title="Open Cardiac AI Agent (Gemini 2.0 Flash)"
+      >
+        <Brain className="w-6 h-6" />
+        <span className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-400 rounded-full border-2 border-white animate-pulse" />
+      </button>
+
+      {/* ── Cardiac Agentic AI Chatbot ── */}
+      <CardiacAgentChatbot
+        isOpen={agentOpen}
+        onClose={() => setAgentOpen(false)}
+        onNavigateTab={(tab: string) => setCurrentTab(tab as AppTab)}
+      />
     </div>
   );
 };

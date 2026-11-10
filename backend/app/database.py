@@ -1,20 +1,22 @@
-
 import getpass
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 def build_database_url():
-    password = getpass.getpass("PostgreSQL password: ")
+    password = os.getenv("DB_PASSWORD", "ayanadnan")
     return URL.create(
         "postgresql+psycopg",
-        username="cardiac_admin",
+        username=os.getenv("DB_USER", "cardiac_admin"),
         password=password,
-        host="127.0.0.1",
-        port=5432,
-        database="cardiac_twin",
+        host=os.getenv("DB_HOST", "127.0.0.1"),
+        port=int(os.getenv("DB_PORT", "5432")),
+        database=os.getenv("DB_NAME", "cardiac_twin"),
     )
 
 DATABASE_URL = os.getenv("DATABASE_URL")

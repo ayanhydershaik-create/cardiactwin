@@ -1,1 +1,61 @@
+# ── Environment & Secrets ──────────────────────────────────────────────────
 .env
+.env.local
+.env.production
+.env.staging
+*.env
+
+# ── Python ──────────────────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+*.egg
+.Python
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+lib/
+lib64/
+*.so
+
+# ── Node / Frontend ─────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/node_modules/
+
+# ── Large Dataset & Research Files (too large for GitHub) ───────────────────
+# Keep the trained model (.joblib) - it's 5 MB, within GitHub limits
+# Keep pipeline scripts
+ecg_pipeline/heartbeat_dataset.csv
+ecg_pipeline/prepared_heartbeat_data.npz
+data/
+
+# ── Database Backups ────────────────────────────────────────────────────────
+*.sql
+*.dump
+*.bak
+*.backup
+
+# ── IDE & OS ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs & Temp ────────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.temp
+scratch_sketch.ino
