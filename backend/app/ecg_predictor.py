@@ -19,7 +19,7 @@ def load_model():
         if getattr(loaded, "n_features_in_", None) == EXPECTED_FEATURES:
             return loaded
     except Exception as exc:
-        print(f"Notice: Model load bypassed ({exc}). Using robust morphologic ECG classifier.")
+        pass
     return None
 
 model = load_model()

@@ -191,6 +191,8 @@ def predict_ecg_heartbeat(request: HeartbeatPredictionRequest):
         return predict_heartbeat(request.features)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Prediction error: {exc}")
 
 # Mount unified router for both root and /api prefixes
 app.include_router(api_router)
