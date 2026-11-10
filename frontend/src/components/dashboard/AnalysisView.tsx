@@ -266,7 +266,13 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ onRecordResult }) =>
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-slate-900 text-sm">Heartbeat Window (234 Samples)</h3>
             <button
-              onClick={() => loadPreset(selectedPreset)}
+              onClick={() => {
+                if (isLiveSource || !selectedPreset) {
+                  loadLiveSample();
+                } else {
+                  loadPreset(selectedPreset);
+                }
+              }}
               className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
               title="Reset"
             >
