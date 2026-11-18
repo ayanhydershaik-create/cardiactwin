@@ -1,30 +1,28 @@
-import getpass
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from sqlalchemy import create_engine
-from sqlalchemy.engine import URL
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-def build_database_url():
-    password = os.getenv("DB_PASSWORD", "ayanadnan")
-    return URL.create(
-        "postgresql+psycopg",
-        username=os.getenv("DB_USER", "cardiac_admin"),
-        password=password,
-        host=os.getenv("DB_HOST", "127.0.0.1"),
-        port=int(os.getenv("DB_PORT", "5432")),
-        database=os.getenv("DB_NAME", "cardiac_twin"),
-    )
+# ── Neon Lakebase Postgres connection ─────────────────────────────────────────
+# Pooled URL  → all application/API traffic (FastAPI request handlers)
+# Unpooled URL → schema migrations (DDL), create_all, pg_dump, LISTEN/NOTIFY
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL_UNPOOLED = os.getenv("DATABASE_URL_UNPOOLED", DATABASE_URL)
 
-if DATABASE_URL:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-else:
-    engine = create_engine(build_database_url(), pool_pre_ping=True)
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL is not set. Add it to backend/.env — see .env.example."
+    )
+
+# App engine: pooled connection for all runtime queries
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
+# Migration engine: direct (non-pooled) connection for create_all / DDL
+migration_engine = create_engine(DATABASE_URL_UNPOOLED, pool_pre_ping=True)
 
 SessionLocal = sessionmaker(
     autocommit=False,
@@ -34,10 +32,9 @@ SessionLocal = sessionmaker(
 
 Base = declarative_base()
 
+
 def get_db():
-    if SessionLocal is None:
-        yield None
-        return
+    """FastAPI dependency — yields a SQLAlchemy session and closes it after."""
     try:
         db = SessionLocal()
         try:

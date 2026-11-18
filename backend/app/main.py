@@ -6,8 +6,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.database import engine, get_db
-from app.models import Patient, ECGObservation
+from app.database import engine, migration_engine, get_db
+from app.models import Base, Patient, ECGObservation
 from app.schemas import (
     PatientCreate,
     PatientRead,
@@ -21,6 +21,23 @@ app = FastAPI(
     description="Research prototype for ECG analysis, cardiac digital twin monitoring — powered by Gemini Agentic AI.",
     version="0.3.0",
 )
+
+
+@app.on_event("startup")
+def create_tables() -> None:
+    """
+    Create all SQLAlchemy-mapped tables in Neon Lakebase Postgres.
+    Uses the direct (non-pooled) connection — required for DDL on Neon.
+    Safe to run on every restart: CREATE TABLE IF NOT EXISTS is idempotent.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        Base.metadata.create_all(bind=migration_engine)
+        logger.info("Neon DB tables verified / created successfully.")
+    except Exception as exc:
+        logger.error("Failed to create tables in Neon DB: %s", exc)
+
 
 # CORS configuration supporting localhost and production Vercel domains
 app.add_middleware(
@@ -72,21 +89,26 @@ def health():
 
 @api_router.get("/health/database")
 def database_health():
+    import os
     try:
         with engine.connect() as connection:
             result = connection.execute(
-                text("SELECT current_database(), current_user")
+                text("SELECT current_database(), current_user, version()")
             ).fetchone()
 
         return {
             "status": "connected",
+            "provider": "neon",
             "database": result[0],
             "user": result[1],
+            "postgres_version": result[2].split(",")[0],
+            "neon_branch": os.getenv("NEON_BRANCH", "unknown"),
+            "neon_branch_id": os.getenv("NEON_BRANCH_ID", "unknown"),
         }
-    except Exception:
+    except Exception as exc:
         raise HTTPException(
             status_code=503,
-            detail="Database connection failed",
+            detail=f"Neon database connection failed: {exc}",
         )
 
 
