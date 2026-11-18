@@ -345,6 +345,15 @@ export class BleAdapter {
         packet.gpsLon = lon;
         if (Math.abs(lat) > 0.0001 && Math.abs(lon) > 0.0001) {
           packet.googleMapsUrl = `https://www.google.com/maps?q=${lat.toFixed(6)},${lon.toFixed(6)}`;
+          // Also persist into latestGps so all views immediately reflect the location
+          this.latestGps = {
+            hasFix: true,
+            lat,
+            lon,
+            timestamp: Date.now(),
+            mapsUrl: packet.googleMapsUrl,
+          };
+          this.onGpsCallbacks.forEach((cb) => cb(this.latestGps!));
         }
 
         this.onDataCallbacks.forEach((cb) => cb(packet));

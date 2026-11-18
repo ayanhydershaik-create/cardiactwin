@@ -20,8 +20,20 @@ export const HardwareDiagnosticsPanel: React.FC = () => {
   const [sosTesting, setSosTesting] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [gpsData, setGpsData] = useState<GpsTelemetry | null>(bleAdapter.getLatestGps());
+  const [deviceCoords, setDeviceCoords] = useState<{ lat: number; lon: number } | null>(null);
   // Track whether ANY test is live on ESP32 so Stop button is always reachable
   const [anyTestActive, setAnyTestActive] = useState(false);
+
+  useEffect(() => {
+    // Check browser device location as backup/comparison
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setDeviceCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+        () => {},
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    }
+  }, []);
 
   useEffect(() => {
     const unsubStatus = bleAdapter.onStatusChange((s) => setBleStatus(s));
@@ -222,26 +234,30 @@ export const HardwareDiagnosticsPanel: React.FC = () => {
             <div className="flex justify-between items-center text-slate-600">
               <span>Latitude:</span>
               <strong className="text-slate-900">
-                {gpsData?.hasFix ? gpsData.lat.toFixed(6) : (isConnected ? 'Acquiring lock...' : 'Waiting for BLE...')}
+                {gpsData?.hasFix 
+                  ? gpsData.lat.toFixed(6) 
+                  : (deviceCoords ? `${deviceCoords.lat.toFixed(6)} (Browser backup)` : (isConnected ? 'Acquiring Neo-6M satellite lock...' : 'Waiting for BLE...'))}
               </strong>
             </div>
 
             <div className="flex justify-between items-center text-slate-600">
               <span>Longitude:</span>
               <strong className="text-slate-900">
-                {gpsData?.hasFix ? gpsData.lon.toFixed(6) : (isConnected ? 'Acquiring lock...' : 'Waiting for BLE...')}
+                {gpsData?.hasFix 
+                  ? gpsData.lon.toFixed(6) 
+                  : (deviceCoords ? `${deviceCoords.lon.toFixed(6)} (Browser backup)` : (isConnected ? 'Acquiring Neo-6M satellite lock...' : 'Waiting for BLE...'))}
               </strong>
             </div>
 
-            {gpsData?.mapsUrl && (
+            {(gpsData?.mapsUrl || deviceCoords) && (
               <a
-                href={gpsData.mapsUrl}
+                href={gpsData?.mapsUrl || `https://maps.google.com/?q=${deviceCoords?.lat.toFixed(6)},${deviceCoords?.lon.toFixed(6)}`}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-600 hover:text-sky-700 pt-1 font-sans underline"
               >
                 <MapPin className="w-3.5 h-3.5 text-rose-500" />
-                Verify Location in Google Maps
+                {gpsData?.hasFix ? 'Verify Satellite Location in Google Maps' : 'View Browser Location in Google Maps'}
                 <ExternalLink className="w-3 h-3" />
               </a>
             )}

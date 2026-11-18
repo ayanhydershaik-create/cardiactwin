@@ -176,7 +176,7 @@ class CardiacServerCallbacks : public BLEServerCallbacks {
 
 class CardiacDataCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pChar) override {
-    std::string rxVal = pChar->getValue();
+    String rxVal = pChar->getValue();
     if (rxVal.length() > 0) {
       Serial.print(">>> [BLE COMMAND RECEIVED]: ");
       Serial.println(rxVal.c_str());
@@ -340,31 +340,46 @@ float parseNmeaCoordinate(const char* str, char hemisphere) {
   return decimalDeg;
 }
 
+// Robust NMEA field extractor: extracts target comma-delimited field without in-place mutation
+// Handles empty fields (e.g. ",,") without shifting indices like strtok does
+bool getNmeaField(const char* sentence, int targetIndex, char* dest, size_t destSize) {
+  dest[0] = '\0';
+  int currentIndex = 0;
+  const char* p = sentence;
+  while (*p && currentIndex < targetIndex) {
+    if (*p == ',') currentIndex++;
+    p++;
+  }
+  if (currentIndex != targetIndex || !*p || *p == ',' || *p == '*') return false;
+  size_t i = 0;
+  while (*p && *p != ',' && *p != '*' && *p != '\r' && *p != '\n' && i < destSize - 1) {
+    dest[i++] = *p++;
+  }
+  dest[i] = '\0';
+  return (i > 0);
+}
+
 // Zero-dependency streaming NMEA sentence decoder
-void parseNmeaLine(char* line) {
-  // $GPRMC / $GNRMC (Recommended Minimum Navigation Information)
+void parseNmeaLine(const char* line) {
+  if (!line || strlen(line) < 10) return;
+
+  // 1. $GPRMC / $GNRMC (Recommended Minimum Specific GPS/TRANSIT Data)
   if (strncmp(line, "$GPRMC", 6) == 0 || strncmp(line, "$GNRMC", 6) == 0) {
-    char* token;
-    char* rest = line;
-    int fieldIndex = 0;
-    char status = 'V';
+    char statusBuf[4] = "";
     char latBuf[16] = "";
-    char latDir = 'N';
+    char latDirBuf[4] = "N";
     char lonBuf[16] = "";
-    char lonDir = 'E';
+    char lonDirBuf[4] = "E";
 
-    while ((token = strtok_r(rest, ",", &rest))) {
-      if (fieldIndex == 2 && strlen(token) > 0) status = token[0];
-      else if (fieldIndex == 3) strncpy(latBuf, token, sizeof(latBuf) - 1);
-      else if (fieldIndex == 4 && strlen(token) > 0) latDir = token[0];
-      else if (fieldIndex == 5) strncpy(lonBuf, token, sizeof(lonBuf) - 1);
-      else if (fieldIndex == 6 && strlen(token) > 0) lonDir = token[0];
-      fieldIndex++;
-    }
+    getNmeaField(line, 2, statusBuf, sizeof(statusBuf));
+    getNmeaField(line, 3, latBuf, sizeof(latBuf));
+    getNmeaField(line, 4, latDirBuf, sizeof(latDirBuf));
+    getNmeaField(line, 5, lonBuf, sizeof(lonBuf));
+    getNmeaField(line, 6, lonDirBuf, sizeof(lonDirBuf));
 
-    if (status == 'A') { // 'A' indicates valid satellite navigational fix
-      float parsedLat = parseNmeaCoordinate(latBuf, latDir);
-      float parsedLon = parseNmeaCoordinate(lonBuf, lonDir);
+    if (statusBuf[0] == 'A') { // 'A' = Valid navigation fix
+      float parsedLat = parseNmeaCoordinate(latBuf, latDirBuf[0]);
+      float parsedLon = parseNmeaCoordinate(lonBuf, lonDirBuf[0]);
       if (abs(parsedLat) > 0.0001 && abs(parsedLon) > 0.0001) {
         gpsLatitude = parsedLat;
         gpsLongitude = parsedLon;
@@ -372,29 +387,48 @@ void parseNmeaLine(char* line) {
       }
     }
   } 
-  // $GPGGA / $GNGGA (Global Positioning System Fix Data)
+  // 2. $GPGGA / $GNGGA (Global Positioning System Fix Data)
   else if (strncmp(line, "$GPGGA", 6) == 0 || strncmp(line, "$GNGGA", 6) == 0) {
-    char* token;
-    char* rest = line;
-    int fieldIndex = 0;
     char latBuf[16] = "";
-    char latDir = 'N';
+    char latDirBuf[4] = "N";
     char lonBuf[16] = "";
-    char lonDir = 'E';
-    int fixQuality = 0;
+    char lonDirBuf[4] = "E";
+    char fixQualityBuf[4] = "0";
 
-    while ((token = strtok_r(rest, ",", &rest))) {
-      if (fieldIndex == 2) strncpy(latBuf, token, sizeof(latBuf) - 1);
-      else if (fieldIndex == 3 && strlen(token) > 0) latDir = token[0];
-      else if (fieldIndex == 4) strncpy(lonBuf, token, sizeof(lonBuf) - 1);
-      else if (fieldIndex == 5 && strlen(token) > 0) lonDir = token[0];
-      else if (fieldIndex == 6) fixQuality = atoi(token);
-      fieldIndex++;
+    getNmeaField(line, 2, latBuf, sizeof(latBuf));
+    getNmeaField(line, 3, latDirBuf, sizeof(latDirBuf));
+    getNmeaField(line, 4, lonBuf, sizeof(lonBuf));
+    getNmeaField(line, 5, lonDirBuf, sizeof(lonDirBuf));
+    getNmeaField(line, 6, fixQualityBuf, sizeof(fixQualityBuf));
+
+    int fixQuality = atoi(fixQualityBuf);
+    if (fixQuality >= 1) { // 1 = GPS fix, 2 = DGPS fix
+      float parsedLat = parseNmeaCoordinate(latBuf, latDirBuf[0]);
+      float parsedLon = parseNmeaCoordinate(lonBuf, lonDirBuf[0]);
+      if (abs(parsedLat) > 0.0001 && abs(parsedLon) > 0.0001) {
+        gpsLatitude = parsedLat;
+        gpsLongitude = parsedLon;
+        gpsFixAcquired = true;
+      }
     }
+  }
+  // 3. $GPGLL / $GNGLL (Geographic Position - Latitude/Longitude)
+  else if (strncmp(line, "$GPGLL", 6) == 0 || strncmp(line, "$GNGLL", 6) == 0) {
+    char latBuf[16] = "";
+    char latDirBuf[4] = "N";
+    char lonBuf[16] = "";
+    char lonDirBuf[4] = "E";
+    char statusBuf[4] = "";
 
-    if (fixQuality > 0) {
-      float parsedLat = parseNmeaCoordinate(latBuf, latDir);
-      float parsedLon = parseNmeaCoordinate(lonBuf, lonDir);
+    getNmeaField(line, 1, latBuf, sizeof(latBuf));
+    getNmeaField(line, 2, latDirBuf, sizeof(latDirBuf));
+    getNmeaField(line, 3, lonBuf, sizeof(lonBuf));
+    getNmeaField(line, 4, lonDirBuf, sizeof(lonDirBuf));
+    getNmeaField(line, 6, statusBuf, sizeof(statusBuf));
+
+    if (statusBuf[0] == 'A') {
+      float parsedLat = parseNmeaCoordinate(latBuf, latDirBuf[0]);
+      float parsedLon = parseNmeaCoordinate(lonBuf, lonDirBuf[0]);
       if (abs(parsedLat) > 0.0001 && abs(parsedLon) > 0.0001) {
         gpsLatitude = parsedLat;
         gpsLongitude = parsedLon;

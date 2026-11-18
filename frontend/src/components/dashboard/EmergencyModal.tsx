@@ -47,19 +47,60 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
 
   const [soundMuted, setSoundMuted] = useState(false);
   const [dismissing, setDismissing] = useState(false);
+  const [browserCoords, setBrowserCoords] = useState<{ lat: number; lon: number } | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sirenIntervalRef = useRef<number | null>(null);
+  const autoDispatchedRef = useRef(false);
+
+  // Request browser geolocation immediately as an instant fallback while hardware satellites lock
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setBrowserCoords({
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+          });
+        },
+        (err) => console.warn('Browser geolocation fallback notice:', err.message),
+        { enableHighAccuracy: true, timeout: 6000 }
+      );
+    }
+  }, []);
 
   const isEmergency = latestPacket?.isEmergency === true;
   const isDispatched = latestPacket?.alarmState === 'dispatched' || (latestPacket?.countdownSeconds ?? 1) <= 0;
   const secondsLeft = latestPacket?.countdownSeconds ?? 30;
   const reason = latestPacket?.alarmReason?.replace(/_/g, ' ') || 'SEVERE CARDIAC EVENT';
-  const lat = latestPacket?.gpsLat || 0;
-  const lon = latestPacket?.gpsLon || 0;
+
+  // Coordinate resolution hierarchy:
+  // 1. ESP32 SOS packet GPS
+  // 2. BLE Adapter latest GPS cache
+  // 3. Browser high-accuracy geolocation fallback
+  const latestGps = bleAdapter.getLatestGps();
+
+  let lat = 0;
+  let lon = 0;
+  let gpsSource = 'none';
+
+  if (latestPacket?.gpsLat && Math.abs(latestPacket.gpsLat) > 0.0001) {
+    lat = latestPacket.gpsLat;
+    lon = latestPacket.gpsLon || 0;
+    gpsSource = 'hardware';
+  } else if (latestGps?.hasFix && Math.abs(latestGps.lat) > 0.0001) {
+    lat = latestGps.lat;
+    lon = latestGps.lon;
+    gpsSource = 'hardware';
+  } else if (browserCoords && Math.abs(browserCoords.lat) > 0.0001) {
+    lat = browserCoords.lat;
+    lon = browserCoords.lon;
+    gpsSource = 'browser';
+  }
+
   const hasGps = Math.abs(lat) > 0.0001 && Math.abs(lon) > 0.0001;
   const mapsUrl = hasGps
-    ? `https://www.google.com/maps?q=${lat.toFixed(6)},${lon.toFixed(6)}`
-    : 'https://www.google.com/maps';
+    ? `https://maps.google.com/?q=${lat.toFixed(6)},${lon.toFixed(6)}`
+    : 'https://maps.google.com';
 
   // ── Stop all audio completely ──────────────────────────────────────
   const stopAudio = () => {
@@ -135,6 +176,7 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
     if (dismissing) return;
     setDismissing(true);
     stopAudio();
+    autoDispatchedRef.current = false;
     // Fire-and-forget: silence buzzer on ESP32
     bleAdapter.sendCommand('RESET_SOS').catch(() => {});
     // Small delay so user sees the button pressed, then close
@@ -144,18 +186,44 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
     }, 300);
   };
 
+  // ── Auto-Dispatch on 30-Second Countdown Expiration ───────────────
+  useEffect(() => {
+    if (isEmergency && isDispatched && !autoDispatchedRef.current) {
+      autoDispatchedRef.current = true;
+      const notifyContacts = contacts.filter((c) => c.notifyOnSOS);
+      if (notifyContacts.length > 0) {
+        // Automatically open WhatsApp for the primary emergency contact
+        const primary = notifyContacts[0];
+        const msg = constructSosMessage(primary);
+        const waUrl = `https://wa.me/${primary.phone.replace(/[^0-9]/g, '')}?text=${msg}`;
+        try {
+          window.open(waUrl, '_blank');
+        } catch (e) {
+          console.warn('Auto-open WhatsApp blocked by browser popup guard:', e);
+        }
+      }
+    }
+    if (!isEmergency) {
+      autoDispatchedRef.current = false;
+    }
+  }, [isEmergency, isDispatched, contacts]);
+
   if (!isEmergency) return null;
+
+  const gpsLabel = gpsSource === 'hardware' 
+    ? 'Neo-6M Satellite Fix' 
+    : (gpsSource === 'browser' ? 'Device High-Accuracy Location' : 'Acquiring Satellites');
 
   const constructSosMessage = (contact: EmergencyContact) => {
     const coordsStr = hasGps
-      ? `GPS Coordinates: ${lat.toFixed(6)}, ${lon.toFixed(6)}\nLive Map: ${mapsUrl}`
-      : 'GPS signal currently acquiring.';
+      ? `📍 Live Location (Google Maps):\n${mapsUrl}\n(Lat: ${lat.toFixed(6)}, Lon: ${lon.toFixed(6)} • ${gpsLabel})`
+      : '📍 GPS Location: Satellite signal currently acquiring.';
     return encodeURIComponent(
       `🚨 EMERGENCY ALERT for ${contact.name} via Cardiac Digital Twin!\n\n` +
-      `Patient alert triggered: ${reason}\n` +
-      `Heart Rate: ${latestPacket?.heartRate ? Math.round(latestPacket.heartRate) + ' BPM' : 'Abnormal'}\n` +
+      `⚠️ Anomaly Detected: ${reason}\n` +
+      `❤️ Heart Rate: ${latestPacket?.heartRate ? Math.round(latestPacket.heartRate) + ' BPM' : 'Abnormal'}\n\n` +
       `${coordsStr}\n\n` +
-      `Please respond or dispatch assistance immediately.`
+      `Please check on patient or dispatch emergency services immediately.`
     );
   };
 
@@ -220,21 +288,21 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
           <p className="text-xs text-slate-600 mt-2">
             {!isDispatched
               ? 'ESP32 active buzzer is pulsing. Click "I Am Safe" below or press the RESET button on the ESP32 board.'
-              : 'The 30-second countdown elapsed. Click "Stop Alarm & Reset" to silence the buzzer and close this alert.'}
+              : 'The 30-second countdown elapsed. Automated WhatsApp SOS dispatched to emergency contacts with live GPS coordinates.'}
           </p>
         </div>
 
-        {/* Neo-6M GPS Coordinates Box */}
+        {/* GPS Coordinates Box with Satellite + Fallback indicator */}
         <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
               <MapPin className="w-4 h-4 text-emerald-600" />
-              Neo-6M GPS Telemetry
+              Geolocation &amp; Satellite Telemetry
             </span>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
               hasGps ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
             }`}>
-              {hasGps ? 'FIX ACQUIRED' : 'ACQUIRING SATELLITES'}
+              {hasGps ? `LOCKED (${gpsLabel})` : 'ACQUIRING SATELLITES'}
             </span>
           </div>
 
