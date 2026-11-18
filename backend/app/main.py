@@ -31,6 +31,13 @@ def startup_event() -> None:
     logger.info("Cardiac Digital Twin API starting up.")
 
 
+# Unified Router serving both root paths (for local dev) and /api paths (for Vercel rewrites)
+api_router = APIRouter()
+
+# Mount agentic AI router at /agent/...
+api_router.include_router(agent_router)
+
+
 @api_router.post("/admin/setup-tables")
 def setup_tables_endpoint():
     """Manual trigger to verify/create all tables in Neon if needed."""
@@ -42,28 +49,6 @@ def setup_tables_endpoint():
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Table setup failed: {exc}")
 
-
-
-# CORS configuration supporting localhost and production Vercel domains
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-    ],
-    allow_origin_regex=r"^https://.*\.vercel\.app$",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Unified Router serving both root paths (for local dev) and /api paths (for Vercel rewrites)
-api_router = APIRouter()
-
-# Mount agentic AI router at /agent/...
-api_router.include_router(agent_router)
 
 
 class HeartbeatPredictionRequest(BaseModel):
