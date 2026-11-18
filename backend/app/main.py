@@ -32,6 +32,9 @@ def create_tables() -> None:
     """
     import logging
     logger = logging.getLogger(__name__)
+    if migration_engine is None:
+        logger.warning("DATABASE_URL is not configured. Skipping table creation.")
+        return
     try:
         Base.metadata.create_all(bind=migration_engine)
         logger.info("Neon DB tables verified / created successfully.")
@@ -90,6 +93,11 @@ def health():
 @api_router.get("/health/database")
 def database_health():
     import os
+    if engine is None:
+        raise HTTPException(
+            status_code=503,
+            detail="DATABASE_URL is not configured in environment variables.",
+        )
     try:
         with engine.connect() as connection:
             result = connection.execute(
