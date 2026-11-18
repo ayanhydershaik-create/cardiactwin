@@ -11,8 +11,9 @@ import { ResultsView } from './components/dashboard/ResultsView';
 import { AssistantView } from './components/chat/AssistantView';
 import { SettingsView } from './components/dashboard/SettingsView';
 import { CardiacAgentChatbot } from './components/chat/CardiacAgentChatbot';
+import { EmergencyModal } from './components/dashboard/EmergencyModal';
 import { bleAdapter } from './services/ble/adapter';
-import { BleConnectionStatus } from './types/ble';
+import { BleConnectionStatus, BlePacket } from './types/ble';
 import { HeartbeatPredictionResponse } from './types/api';
 
 interface SessionResult {
@@ -43,6 +44,17 @@ const MainApp: React.FC = () => {
     return [];
   });
   const [agentOpen, setAgentOpen] = useState(false);
+  const [emergencyPacket, setEmergencyPacket] = useState<BlePacket | null>(null);
+
+  // Subscribe to BLE packets for emergency SOS broadcast
+  React.useEffect(() => {
+    const unsub = bleAdapter.onData((packet) => {
+      if (packet.isEmergency || packet.alarmState === 'countdown' || packet.alarmState === 'dispatched') {
+        setEmergencyPacket(packet);
+      }
+    });
+    return () => unsub();
+  }, []);
 
   // Sync recent results to localStorage
   React.useEffect(() => {
@@ -140,6 +152,12 @@ const MainApp: React.FC = () => {
         isOpen={agentOpen}
         onClose={() => setAgentOpen(false)}
         onNavigateTab={(tab: string) => setCurrentTab(tab as AppTab)}
+      />
+
+      {/* ── Autonomous Emergency SOS Modal (Neo-6M GPS & Alarm) ── */}
+      <EmergencyModal
+        latestPacket={emergencyPacket}
+        onDismiss={() => setEmergencyPacket(null)}
       />
     </div>
   );

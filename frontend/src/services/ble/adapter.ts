@@ -247,6 +247,29 @@ export class BleAdapter {
         return;
       }
 
+      // ── 0. Emergency SOS Broadcaster with Neo-6M GPS ────────────────────
+      if (text.startsWith('SOS:')) {
+        const parts = text.slice(4).split(',');
+        const state = (parts[0] || 'countdown').toLowerCase() as 'countdown' | 'dispatched';
+        const reason = parts[1] || 'CRITICAL_CARDIAC_EVENT';
+        const secs = parseInt(parts[2], 10) || 0;
+        const lat = parseFloat(parts[3]) || 0;
+        const lon = parseFloat(parts[4]) || 0;
+
+        packet.isEmergency = true;
+        packet.alarmState = state;
+        packet.alarmReason = reason;
+        packet.countdownSeconds = secs;
+        packet.gpsLat = lat;
+        packet.gpsLon = lon;
+        if (Math.abs(lat) > 0.0001 && Math.abs(lon) > 0.0001) {
+          packet.googleMapsUrl = `https://www.google.com/maps?q=${lat.toFixed(6)},${lon.toFixed(6)}`;
+        }
+
+        this.onDataCallbacks.forEach((cb) => cb(packet));
+        return;
+      }
+
       // ── 1. Format: "E:..." (Compact & Batched)
       if (text.startsWith('E:')) {
         const payloadStr = text.slice(2);

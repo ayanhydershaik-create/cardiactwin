@@ -212,6 +212,87 @@ export const SettingsView: React.FC = () => {
           </div>
         </form>
       </div>
+
+      {/* 3. Emergency SOS & Neo-6M GPS Contacts */}
+      <EmergencyContactsSettings />
     </div>
   );
 };
+
+const EmergencyContactsSettings: React.FC = () => {
+  const [contacts, setContacts] = useState<any[]>(() => {
+    try {
+      const stored = localStorage.getItem('cardiac_twin_emergency_contacts');
+      return stored ? JSON.parse(stored) : [
+        { id: 'c1', name: 'Primary Guardian', phone: '+919876543210', relationship: 'Family', notifyOnSOS: true },
+        { id: 'c2', name: 'Attending Cardiologist', phone: '+919811223344', relationship: 'Physician', notifyOnSOS: true }
+      ];
+    } catch {
+      return [];
+    }
+  });
+
+  const [saved, setSaved] = useState(false);
+
+  const handleUpdate = (id: string, field: string, val: string) => {
+    const updated = contacts.map((c) => (c.id === id ? { ...c, [field]: val } : c));
+    setContacts(updated);
+  };
+
+  const handleSave = () => {
+    localStorage.setItem('cardiac_twin_emergency_contacts', JSON.stringify(contacts));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  return (
+    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div>
+          <h3 className="font-bold text-slate-900 text-sm">Emergency SOS & Neo-6M GPS Contacts</h3>
+          <p className="text-xs text-slate-500">
+            Contacts notified via instant WhatsApp/SMS with Google Maps pin if 30-second countdown expires.
+          </p>
+        </div>
+        <button
+          onClick={handleSave}
+          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-colors"
+        >
+          {saved ? 'Saved!' : 'Save Contacts'}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {contacts.map((c, idx) => (
+          <div key={c.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+              Contact #{idx + 1} ({c.relationship})
+            </span>
+
+            <div>
+              <label className="text-[11px] font-semibold text-slate-600 block mb-0.5">Contact Name</label>
+              <input
+                type="text"
+                value={c.name}
+                onChange={(e) => handleUpdate(c.id, 'name', e.target.value)}
+                className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-slate-600 block mb-0.5">Phone (with country code)</label>
+              <input
+                type="text"
+                value={c.phone}
+                onChange={(e) => handleUpdate(c.id, 'phone', e.target.value)}
+                placeholder="+91..."
+                className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+

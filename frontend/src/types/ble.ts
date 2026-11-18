@@ -37,4 +37,20 @@ export interface BlePacket {
   gx?: number;
   gy?: number;
   gz?: number;
+  // Emergency & Neo-6M GPS Telemetry
+  isEmergency?: boolean;
+  alarmState?: 'normal' | 'countdown' | 'dispatched';
+  alarmReason?: string;
+  countdownSeconds?: number;
+  gpsLat?: number;
+  gpsLon?: number;
+  googleMapsUrl?: string;
+}
+
+export interface EmergencyContact {
+  id: string;
+  name: string;
+  phone: string;
+  relationship: string;
+  notifyOnSOS: boolean;
 }
