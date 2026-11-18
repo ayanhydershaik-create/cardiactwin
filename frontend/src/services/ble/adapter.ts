@@ -1,4 +1,4 @@
-import { BleConfiguration, BleConnectionStatus, BleDeviceInfo, BlePacket } from '../../types/ble';
+import { BleConfiguration, BleConnectionStatus, BleDeviceInfo, BlePacket, GpsTelemetry } from '../../types/ble';
 
 // ESP32-S3 CARDIAC_TWIN hardware UUIDs
 export const DEFAULT_BLE_CONFIG: BleConfiguration = {
@@ -22,6 +22,9 @@ export class BleAdapter {
   private onStatusChangeCallbacks: Array<(status: BleConnectionStatus) => void> = [];
   private onDataCallbacks: Array<(packet: BlePacket) => void> = [];
   private onErrorCallbacks: Array<(error: string) => void> = [];
+  private onGpsCallbacks: Array<(gps: GpsTelemetry) => void> = [];
+
+  private latestGps: GpsTelemetry | null = null;
 
   // Rolling in-memory window of recent voltages across all views
   private recentVoltages: number[] = [];
@@ -57,6 +60,42 @@ export class BleAdapter {
 
   public updateConfig(newConfig: Partial<BleConfiguration>): void {
     this.config = { ...this.config, ...newConfig };
+  }
+
+  public getLatestGps(): GpsTelemetry | null {
+    return this.latestGps;
+  }
+
+  public onGps(cb: (gps: GpsTelemetry) => void): () => void {
+    this.onGpsCallbacks.push(cb);
+    if (this.latestGps) {
+      cb(this.latestGps);
+    }
+    return () => {
+      this.onGpsCallbacks = this.onGpsCallbacks.filter((c) => c !== cb);
+    };
+  }
+
+  public async sendCommand(cmd: string): Promise<boolean> {
+    if (!this.characteristic || this.status !== 'connected') {
+      return false;
+    }
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(cmd);
+      const charAny = this.characteristic as any;
+      if (typeof charAny.writeValueWithResponse === 'function') {
+        await charAny.writeValueWithResponse(data);
+      } else if (typeof charAny.writeValue === 'function') {
+        await charAny.writeValue(data);
+      } else if (typeof charAny.writeValueWithoutResponse === 'function') {
+        await charAny.writeValueWithoutResponse(data);
+      }
+      return true;
+    } catch (err) {
+      console.warn('BLE sendCommand error:', err);
+      return false;
+    }
   }
 
   public onStatusChange(callback: (status: BleConnectionStatus) => void): () => void {
@@ -267,6 +306,27 @@ export class BleAdapter {
         }
 
         this.onDataCallbacks.forEach((cb) => cb(packet));
+        return;
+      }
+
+      // ── 0.5. Neo-6M GPS Telemetry Broadcast: "GPS:<hasFix>,<lat>,<lon>" ───
+      if (text.startsWith('GPS:')) {
+        const parts = text.slice(4).split(',');
+        const hasFix = parts[0] === '1';
+        const lat = parseFloat(parts[1]) || 0;
+        const lon = parseFloat(parts[2]) || 0;
+
+        this.latestGps = {
+          hasFix,
+          lat,
+          lon,
+          timestamp: Date.now(),
+          mapsUrl: (Math.abs(lat) > 0.0001 && Math.abs(lon) > 0.0001)
+            ? `https://www.google.com/maps?q=${lat.toFixed(6)},${lon.toFixed(6)}`
+            : undefined,
+        };
+
+        this.onGpsCallbacks.forEach((cb) => cb(this.latestGps!));
         return;
       }
 

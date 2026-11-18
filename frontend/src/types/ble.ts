@@ -54,3 +54,11 @@ export interface EmergencyContact {
   relationship: string;
   notifyOnSOS: boolean;
 }
+
+export interface GpsTelemetry {
+  hasFix: boolean;
+  lat: number;
+  lon: number;
+  timestamp: number;
+  mapsUrl?: string;
+}

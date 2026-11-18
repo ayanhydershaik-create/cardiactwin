@@ -131,6 +131,8 @@ unsigned long lastFallTriggerTime = 0;
 
 // Non-blocking buzzer state machine
 bool buzzerOutputState = false;
+bool testBuzzerActive = false;
+unsigned long testBuzzerUntil = 0;
 
 // ---------------- TIMERS -------------------------------------------
 unsigned long lastMAXRead = 0;
@@ -138,6 +140,7 @@ unsigned long lastMPURead = 0;
 unsigned long lastOLEDUpdate = 0;
 unsigned long lastSerialUpdate = 0;
 unsigned long lastBLEUpdate = 0;
+unsigned long lastGpsBleUpdate = 0;
 unsigned long lastPageSwitch = 0;
 
 int oledPage = 0;
@@ -171,6 +174,29 @@ class CardiacServerCallbacks : public BLEServerCallbacks {
   }
 };
 
+class CardiacDataCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pChar) override {
+    std::string rxVal = pChar->getValue();
+    if (rxVal.length() > 0) {
+      Serial.print(">>> [BLE COMMAND RECEIVED]: ");
+      Serial.println(rxVal.c_str());
+      if (rxVal == "TEST_BUZZER") {
+        testBuzzerActive = true;
+        testBuzzerUntil = millis() + 3000;
+        Serial.println(">>> [BUZZER TEST] 3-Second Test Pulse Activated");
+      } else if (rxVal == "TEST_SOS") {
+        triggerEmergency("MANUAL_WEB_TEST");
+      } else if (rxVal == "RESET_SOS" || rxVal == "STOP_BUZZER") {
+        testBuzzerActive = false;
+        emergencyState = EMG_NORMAL;
+        buzzerOutputState = false;
+        digitalWrite(BUZZER_PIN, LOW);
+        Serial.println(">>> [ALERT RESET] Returned to Normal Monitoring");
+      }
+    }
+  }
+};
+
 // ===================================================================
 // BLE INITIALIZATION
 // ===================================================================
@@ -186,9 +212,11 @@ void setupBLE() {
   dataCharacteristic = service->createCharacteristic(
     CHARACTERISTIC_UUID,
     BLECharacteristic::PROPERTY_READ |
+    BLECharacteristic::PROPERTY_WRITE |
     BLECharacteristic::PROPERTY_NOTIFY
   );
 
+  dataCharacteristic->setCallbacks(new CardiacDataCallbacks());
   dataCharacteristic->addDescriptor(new BLE2902());
   dataCharacteristic->setValue("CARDIAC_TWIN_READY");
 
@@ -424,6 +452,25 @@ void triggerEmergency(const char* reason) {
 void updateBuzzer() {
   unsigned long now = millis();
 
+  // 1. Web-Triggered Test Pulse (3 Seconds)
+  if (testBuzzerActive) {
+    if (now >= testBuzzerUntil) {
+      testBuzzerActive = false;
+      buzzerOutputState = false;
+      digitalWrite(BUZZER_PIN, LOW);
+      return;
+    }
+    // Intermittent double-beep test cadence (120ms ON, 120ms OFF)
+    unsigned long cyclePos = now % 300;
+    bool shouldBeep = (cyclePos < 120);
+    if (shouldBeep != buzzerOutputState) {
+      buzzerOutputState = shouldBeep;
+      digitalWrite(BUZZER_PIN, buzzerOutputState ? HIGH : LOW);
+    }
+    return;
+  }
+
+  // 2. Normal State
   if (emergencyState == EMG_NORMAL) {
     if (buzzerOutputState) {
       digitalWrite(BUZZER_PIN, LOW);
@@ -432,6 +479,7 @@ void updateBuzzer() {
     return;
   }
 
+  // 3. Armed State (30s Grace Countdown)
   if (emergencyState == EMG_ARMED) {
     // Intermittent Pulsed Double-Beep ("beep... beep..."):
     // 0 - 120ms: ON | 120 - 200ms: OFF | 200 - 320ms: ON | 320 - 1000ms: OFF
@@ -443,7 +491,7 @@ void updateBuzzer() {
       digitalWrite(BUZZER_PIN, buzzerOutputState ? HIGH : LOW);
     }
   } else if (emergencyState == EMG_DISPATCHED) {
-    // Escalated rapid emergency siren cadence: 150ms ON, 150ms OFF
+    // 4. Escalated rapid emergency siren cadence: 150ms ON, 150ms OFF
     unsigned long cyclePos = now % 300;
     bool shouldBeep = (cyclePos < 150);
 
@@ -921,7 +969,24 @@ void updateBLE() {
     return;
   }
 
-  // ── 2. NORMAL CLINICAL STREAM PACKET (<= 18 Bytes) ────────────────
+  // ── 2. PERIODIC GPS BROADCAST (Every 1000ms in normal state) ───────
+  if (millis() - lastGpsBleUpdate >= 1000) {
+    lastGpsBleUpdate = millis();
+    char gpsPayload[48];
+    snprintf(
+      gpsPayload,
+      sizeof(gpsPayload),
+      "GPS:%d,%.6f,%.6f",
+      gpsFixAcquired ? 1 : 0,
+      gpsLatitude,
+      gpsLongitude
+    );
+    dataCharacteristic->setValue(gpsPayload);
+    dataCharacteristic->notify();
+    return;
+  }
+
+  // ── 3. NORMAL CLINICAL STREAM PACKET (<= 18 Bytes) ────────────────
   int leadsOff = leadsAttached ? 0 : 1;
   int bioToSend = leadsAttached ? (int)currentBiopotential : 0;
 

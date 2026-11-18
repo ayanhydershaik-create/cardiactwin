@@ -11,6 +11,7 @@ import { apiClient } from '../../services/api/client';
 import { bleAdapter, DEFAULT_BLE_CONFIG } from '../../services/ble/adapter';
 import { BleConfiguration } from '../../types/ble';
 import { useAuth } from '../../services/auth/authContext';
+import { HardwareDiagnosticsPanel } from './HardwareDiagnosticsPanel';
 
 export const SettingsView: React.FC = () => {
   const { user } = useAuth();
@@ -98,7 +99,10 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. System Diagnostics (Moved out of the main dashboard) */}
+      {/* 2. Hardware Diagnostics & Verification Suite */}
+      <HardwareDiagnosticsPanel />
+
+      {/* 3. System Diagnostics (Moved out of the main dashboard) */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
