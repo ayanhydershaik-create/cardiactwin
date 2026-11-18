@@ -24,7 +24,7 @@ load_dotenv()
 
 from google import genai
 from google.genai import types as genai_types
-from google.api_core import exceptions as google_exceptions
+from google.genai import errors as genai_errors
 from sqlalchemy.orm import Session
 
 from app.models import AgentActivity, ECGObservation, Patient
@@ -450,13 +450,16 @@ def run_agent(
                     logger.warning("Gemini model %s timed out (>3.5s) on %s. Shifting immediately.", model_name, key_label)
                     key_pool.mark_failed(key_label, cooldown_seconds=60)
                     break
-                except google_exceptions.Unauthenticated:
-                    logger.warning("Key %s unauthenticated. Shifting to next key.", key_label)
-                    key_pool.mark_failed(key_label, cooldown_seconds=3600)
-                    break
-                except google_exceptions.ResourceExhausted:
-                    logger.warning("Key %s quota exhausted. Shifting to next key.", key_label)
-                    key_pool.mark_failed(key_label, cooldown_seconds=180)
+                except genai_errors.ClientError as ce:
+                    err_str = str(ce).lower()
+                    if any(term in err_str for term in ["401", "unauthenticated", "invalid", "not valid"]):
+                        logger.warning("Key %s unauthenticated. Shifting to next key.", key_label)
+                        key_pool.mark_failed(key_label, cooldown_seconds=3600)
+                    elif any(term in err_str for term in ["429", "resource_exhausted", "quota"]):
+                        logger.warning("Key %s quota exhausted. Shifting to next key.", key_label)
+                        key_pool.mark_failed(key_label, cooldown_seconds=180)
+                    else:
+                        logger.warning("ClientError on %s: %s", key_label, ce)
                     break
                 except Exception as e:
                     err_str = str(e).lower()
