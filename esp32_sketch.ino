@@ -157,6 +157,9 @@ int oledPage = 0;
 BLECharacteristic *dataCharacteristic;
 bool bleConnected = false;
 
+// Forward declaration for BLE callbacks
+void triggerEmergency(const char* reason);
+
 // ===================================================================
 // BLE CALLBACKS
 // ===================================================================
