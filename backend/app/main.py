@@ -24,22 +24,24 @@ app = FastAPI(
 
 
 @app.on_event("startup")
-def create_tables() -> None:
-    """
-    Create all SQLAlchemy-mapped tables in Neon Lakebase Postgres.
-    Uses the direct (non-pooled) connection — required for DDL on Neon.
-    Safe to run on every restart: CREATE TABLE IF NOT EXISTS is idempotent.
-    """
+def startup_event() -> None:
+    """Log server startup. Database migrations are handled once, not on every serverless cold start."""
     import logging
     logger = logging.getLogger(__name__)
+    logger.info("Cardiac Digital Twin API starting up.")
+
+
+@api_router.post("/admin/setup-tables")
+def setup_tables_endpoint():
+    """Manual trigger to verify/create all tables in Neon if needed."""
     if migration_engine is None:
-        logger.warning("DATABASE_URL is not configured. Skipping table creation.")
-        return
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
     try:
         Base.metadata.create_all(bind=migration_engine)
-        logger.info("Neon DB tables verified / created successfully.")
+        return {"status": "ok", "message": "All tables created / verified in Neon DB"}
     except Exception as exc:
-        logger.error("Failed to create tables in Neon DB: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Table setup failed: {exc}")
+
 
 
 # CORS configuration supporting localhost and production Vercel domains
