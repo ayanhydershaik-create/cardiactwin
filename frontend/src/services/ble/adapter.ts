@@ -241,9 +241,51 @@ export class BleAdapter {
 
   private handleDisconnection() {
     this.setStatus('disconnected');
-    this.device = null;
-    this.server = null;
     this.characteristic = null;
+    this.server = null;
+    // Auto-reconnect: try reconnecting every 3 seconds if device is still known
+    if (this.device) {
+      setTimeout(() => this.tryReconnect(), 3000);
+    } else {
+      this.device = null;
+    }
+  }
+
+  private async tryReconnect() {
+    if (!this.device || this.status === 'connected' || this.status === 'connecting') return;
+    try {
+      console.log('[BLE] Attempting auto-reconnect...');
+      this.setStatus('connecting');
+      if (!this.device.gatt) return;
+      this.server = await this.device.gatt.connect();
+
+      let service: BluetoothRemoteGATTService;
+      try {
+        service = await this.server.getPrimaryService(this.config.serviceUuid);
+      } catch {
+        service = await this.server.getPrimaryService('0000180d-0000-1000-8000-00805f9b34fb');
+      }
+
+      try {
+        this.characteristic = await service.getCharacteristic(this.config.characteristicUuid);
+      } catch {
+        this.characteristic = await service.getCharacteristic('00002a37-0000-1000-8000-00805f9b34fb');
+      }
+
+      await this.characteristic.startNotifications();
+      this.characteristic.addEventListener(
+        'characteristicvaluechanged',
+        this.handleCharacteristicValueChanged.bind(this)
+      );
+
+      this.setStatus('connected');
+      console.log('[BLE] Auto-reconnect successful!');
+    } catch (err) {
+      console.warn('[BLE] Auto-reconnect failed, retrying in 5s...', err);
+      this.setStatus('disconnected');
+      // Retry again after 5 seconds
+      setTimeout(() => this.tryReconnect(), 5000);
+    }
   }
 
   private convertAdcToMv(raw: number): number {

@@ -45,15 +45,28 @@ const MainApp: React.FC = () => {
   });
   const [agentOpen, setAgentOpen] = useState(false);
   const [emergencyPacket, setEmergencyPacket] = useState<BlePacket | null>(null);
+  // When user dismisses, we block future SOS packets for 60s so the modal stays closed
+  const emergencyDismissedUntilRef = React.useRef<number>(0);
 
   // Subscribe to BLE packets for emergency SOS broadcast
   React.useEffect(() => {
     const unsub = bleAdapter.onData((packet) => {
+      // If user already dismissed, ignore SOS packets for the cooldown window
+      if (Date.now() < emergencyDismissedUntilRef.current) return;
       if (packet.isEmergency || packet.alarmState === 'countdown' || packet.alarmState === 'dispatched') {
         setEmergencyPacket(packet);
       }
     });
     return () => unsub();
+  }, []);
+
+  const handleEmergencyDismiss = React.useCallback(async () => {
+    // 1. Stop the modal immediately
+    setEmergencyPacket(null);
+    // 2. Suppress re-triggering for 60 seconds (ESP32 may keep broadcasting until reset)
+    emergencyDismissedUntilRef.current = Date.now() + 60_000;
+    // 3. Send RESET_SOS command to ESP32 to stop the physical buzzer
+    await bleAdapter.sendCommand('RESET_SOS');
   }, []);
 
   // Sync recent results to localStorage
@@ -157,7 +170,7 @@ const MainApp: React.FC = () => {
       {/* ── Autonomous Emergency SOS Modal (Neo-6M GPS & Alarm) ── */}
       <EmergencyModal
         latestPacket={emergencyPacket}
-        onDismiss={() => setEmergencyPacket(null)}
+        onDismiss={handleEmergencyDismiss}
       />
     </div>
   );

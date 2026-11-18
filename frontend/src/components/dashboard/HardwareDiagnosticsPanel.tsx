@@ -20,13 +20,23 @@ export const HardwareDiagnosticsPanel: React.FC = () => {
   const [sosTesting, setSosTesting] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [gpsData, setGpsData] = useState<GpsTelemetry | null>(bleAdapter.getLatestGps());
+  // Track whether ANY test is live on ESP32 so Stop button is always reachable
+  const [anyTestActive, setAnyTestActive] = useState(false);
 
   useEffect(() => {
     const unsubStatus = bleAdapter.onStatusChange((s) => setBleStatus(s));
     const unsubGps = bleAdapter.onGps((gps) => setGpsData(gps));
+    // Also watch for SOS packets to show the Stop button
+    const unsubData = bleAdapter.onData((pkt) => {
+      if (pkt.isEmergency || pkt.alarmState === 'countdown' || pkt.alarmState === 'dispatched') {
+        setAnyTestActive(true);
+        setSosTesting(true);
+      }
+    });
     return () => {
       unsubStatus();
       unsubGps();
+      unsubData();
     };
   }, []);
 
@@ -38,11 +48,13 @@ export const HardwareDiagnosticsPanel: React.FC = () => {
     }
 
     setBuzzerTesting(true);
+    setAnyTestActive(true);
     setActionFeedback('🔊 Command sent! Pulsing buzzer on GPIO 7 for 3 seconds...');
     await bleAdapter.sendCommand('TEST_BUZZER');
 
     setTimeout(() => {
       setBuzzerTesting(false);
+      setAnyTestActive(false);
       setActionFeedback('✅ Buzzer test complete. Did you hear the double-beep?');
       setTimeout(() => setActionFeedback(null), 4000);
     }, 3000);
@@ -56,15 +68,18 @@ export const HardwareDiagnosticsPanel: React.FC = () => {
     }
 
     setSosTesting(true);
+    setAnyTestActive(true);
     setActionFeedback('🚨 30-Second SOS Emergency Countdown armed on ESP32 & OLED!');
     await bleAdapter.sendCommand('TEST_SOS');
   };
 
   const handleStopBuzzer = async () => {
-    if (bleStatus !== 'connected') return;
     setBuzzerTesting(false);
     setSosTesting(false);
-    await bleAdapter.sendCommand('RESET_SOS');
+    setAnyTestActive(false);
+    if (bleStatus === 'connected') {
+      await bleAdapter.sendCommand('RESET_SOS');
+    }
     setActionFeedback('🛑 Buzzer silenced & alert state reset to normal.');
     setTimeout(() => setActionFeedback(null), 3000);
   };
@@ -155,13 +170,14 @@ export const HardwareDiagnosticsPanel: React.FC = () => {
               </button>
             </div>
 
-            {(buzzerTesting || sosTesting) && (
+            {/* Stop button — always visible once any test is active */}
+            {(buzzerTesting || sosTesting || anyTestActive) && (
               <button
                 onClick={handleStopBuzzer}
                 className="w-full py-2 px-3 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-xs"
               >
                 <Square className="w-3.5 h-3.5 fill-current" />
-                <span>Silence Buzzer & Reset Alert</span>
+                <span>Silence Buzzer &amp; Reset Alert</span>
               </button>
             )}
           </div>

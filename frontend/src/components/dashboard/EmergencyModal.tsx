@@ -7,9 +7,11 @@ import {
   Volume2, 
   VolumeX, 
   ExternalLink, 
-  ShieldAlert 
+  ShieldAlert,
+  Square
 } from 'lucide-react';
 import { BlePacket, EmergencyContact } from '../../types/ble';
+import { bleAdapter } from '../../services/ble/adapter';
 
 interface EmergencyModalProps {
   latestPacket: BlePacket | null;
@@ -44,6 +46,7 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
   });
 
   const [soundMuted, setSoundMuted] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sirenIntervalRef = useRef<number | null>(null);
 
@@ -54,11 +57,23 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
   const lat = latestPacket?.gpsLat || 0;
   const lon = latestPacket?.gpsLon || 0;
   const hasGps = Math.abs(lat) > 0.0001 && Math.abs(lon) > 0.0001;
-  const mapsUrl = hasGps 
-    ? `https://www.google.com/maps?q=${lat.toFixed(6)},${lon.toFixed(6)}` 
+  const mapsUrl = hasGps
+    ? `https://www.google.com/maps?q=${lat.toFixed(6)},${lon.toFixed(6)}`
     : 'https://www.google.com/maps';
 
-  // Play Web Audio siren without external file dependencies
+  // ── Stop all audio completely ──────────────────────────────────────
+  const stopAudio = () => {
+    if (sirenIntervalRef.current) {
+      clearInterval(sirenIntervalRef.current);
+      sirenIntervalRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      try { audioCtxRef.current.close(); } catch { /* ignore */ }
+      audioCtxRef.current = null;
+    }
+  };
+
+  // ── Play Web Audio siren chirp ─────────────────────────────────────
   const playAlertChirp = () => {
     if (soundMuted) return;
     try {
@@ -66,15 +81,14 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
         audioCtxRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       }
       const ctx = audioCtxRef.current;
-      if (ctx.state === 'suspended') {
-        ctx.resume();
-      }
+      if (ctx.state === 'suspended') ctx.resume();
+
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
       osc.type = 'triangle';
-      osc.frequency.setValueAtTime(880, ctx.currentTime); // A5 note
-      osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.12); // Sweep up
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.12);
 
       gain.gain.setValueAtTime(0.3, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
@@ -89,12 +103,14 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
     }
   };
 
+  // ── Manage siren interval ─────────────────────────────────────────
   useEffect(() => {
     if (isEmergency && !soundMuted) {
       playAlertChirp();
-      sirenIntervalRef.current = window.setInterval(() => {
-        playAlertChirp();
-      }, isDispatched ? 400 : 900);
+      sirenIntervalRef.current = window.setInterval(
+        () => playAlertChirp(),
+        isDispatched ? 400 : 900
+      );
     } else {
       if (sirenIntervalRef.current) {
         clearInterval(sirenIntervalRef.current);
@@ -104,14 +120,34 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
     return () => {
       if (sirenIntervalRef.current) {
         clearInterval(sirenIntervalRef.current);
+        sirenIntervalRef.current = null;
       }
     };
   }, [isEmergency, isDispatched, soundMuted]);
 
+  // ── Clean up audio when unmounting ───────────────────────────────
+  useEffect(() => {
+    return () => { stopAudio(); };
+  }, []);
+
+  // ── Handle dismiss: stop audio + send RESET_SOS to ESP32 ─────────
+  const handleDismiss = async () => {
+    if (dismissing) return;
+    setDismissing(true);
+    stopAudio();
+    // Fire-and-forget: silence buzzer on ESP32
+    bleAdapter.sendCommand('RESET_SOS').catch(() => {});
+    // Small delay so user sees the button pressed, then close
+    setTimeout(() => {
+      onDismiss();
+      setDismissing(false);
+    }, 300);
+  };
+
   if (!isEmergency) return null;
 
   const constructSosMessage = (contact: EmergencyContact) => {
-    const coordsStr = hasGps 
+    const coordsStr = hasGps
       ? `GPS Coordinates: ${lat.toFixed(6)}, ${lon.toFixed(6)}\nLive Map: ${mapsUrl}`
       : 'GPS signal currently acquiring.';
     return encodeURIComponent(
@@ -126,10 +162,11 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in">
       <div className={`relative w-full max-w-xl rounded-3xl border-2 shadow-2xl p-6 sm:p-8 space-y-6 bg-white overflow-hidden ${
-        isDispatched 
-          ? 'border-red-600 ring-8 ring-red-500/20' 
+        isDispatched
+          ? 'border-red-600 ring-8 ring-red-500/20'
           : 'border-amber-500 ring-8 ring-amber-500/20 animate-pulse'
       }`}>
+
         {/* Header Ribbon */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-4">
           <div className="flex items-center gap-3">
@@ -148,6 +185,7 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
             </div>
           </div>
 
+          {/* Mute toggle */}
           <button
             onClick={() => setSoundMuted(!soundMuted)}
             className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
@@ -159,8 +197,8 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
 
         {/* Reason & Countdown Banner */}
         <div className={`p-4 rounded-2xl border ${
-          isDispatched 
-            ? 'bg-red-50 border-red-200 text-red-900' 
+          isDispatched
+            ? 'bg-red-50 border-red-200 text-red-900'
             : 'bg-amber-50 border-amber-200 text-amber-950'
         }`}>
           <div className="flex items-center justify-between">
@@ -180,9 +218,9 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
           </div>
 
           <p className="text-xs text-slate-600 mt-2">
-            {!isDispatched 
-              ? 'ESP32 active buzzer is pulsing a warning alert. Press the RESET button on your ESP32 board or click below if you are safe.' 
-              : 'The 30-second countdown elapsed. Automated emergency location details are prepared for instant broadcast.'}
+            {!isDispatched
+              ? 'ESP32 active buzzer is pulsing. Click "I Am Safe" below or press the RESET button on the ESP32 board.'
+              : 'The 30-second countdown elapsed. Click "Stop Alarm & Reset" to silence the buzzer and close this alert.'}
           </p>
         </div>
 
@@ -232,11 +270,9 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
 
               return (
                 <div key={contact.id} className="p-3.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 shadow-2xs space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="font-bold text-slate-900 text-xs">{contact.name}</h4>
-                      <span className="text-[11px] text-slate-400">{contact.relationship} • {contact.phone}</span>
-                    </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-xs">{contact.name}</h4>
+                    <span className="text-[11px] text-slate-400">{contact.relationship} • {contact.phone}</span>
                   </div>
 
                   <div className="flex gap-2">
@@ -265,13 +301,26 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({ latestPacket, on
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-between border-t border-slate-100 pt-4">
+        <div className="flex flex-col sm:flex-row gap-2 border-t border-slate-100 pt-4">
+          {/* Always visible: I Am Safe */}
           <button
-            onClick={onDismiss}
-            className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
+            onClick={handleDismiss}
+            disabled={dismissing}
+            className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
           >
-            <CheckCircle className="w-4 h-4 text-emerald-400" />
-            I Am Safe — Dismiss Alarm
+            <CheckCircle className="w-4 h-4" />
+            {dismissing ? 'Silencing Buzzer...' : 'I Am Safe — Dismiss Alarm'}
+          </button>
+
+          {/* Always visible: Force stop */}
+          <button
+            onClick={handleDismiss}
+            disabled={dismissing}
+            className="sm:w-auto py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
+            title="Stop buzzer on ESP32 and close this alert"
+          >
+            <Square className="w-4 h-4 fill-current" />
+            Stop & Reset
           </button>
         </div>
       </div>
